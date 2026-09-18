@@ -1,8 +1,10 @@
 # Glimmer Learning — Mobile Games (Plan)
 
-**Status:** Spec approved — ready to build. Recorded 2026-09-17; spec written 2026-09-18.
+**Status:** Built & pushed to GitHub 2026-09-18 — pending GitHub Pages enable + real-device QA. Recorded 2026-09-17; spec written 2026-09-18.
 **Owner:** May Tickner Everest / Glimmer Learning
-**Spec:** `build-notes/key_stack_v1_spec.md` (authoritative for the v1 build).
+**Spec:** `build-notes/key_stack_v1_spec.md` · **Plan:** `build-notes/2026-09-18-key-stack-v1-plan.md`.
+**Repo:** https://github.com/TheGlimmerOA/mobile-games (public). Local repo git-inited here; 34 logic unit tests pass (`node --test`); browser-verified in Chrome. Commit emails use the GitHub noreply address (172157533+TheGlimmerOA@users.noreply.github.com) because the account blocks private-email pushes.
+**Remaining:** (1) enable Pages: Settings → Pages → Deploy from branch → main/root; (2) device QA on iOS Safari + Android Chrome; (3) Squarespace page + home-page button (owner, manual).
 
 ## Why
 
