@@ -74,3 +74,41 @@ test('dropY stacks on top of a locked cell', () => {
   g[ROWS - 1][1] = 'T';
   assert.equal(dropY(g, TETRO.O, 0, 0), ROWS - 3);
 });
+
+import { lockPiece, fullRows, clearRows } from './logic.js';
+
+test('lockPiece stamps the name and does not mutate input', () => {
+  const g = emptyGrid();
+  const out = lockPiece(g, TETRO.O, 'O', 0, ROWS - 2);
+  assert.equal(out[ROWS - 1][0], 'O');
+  assert.equal(out[ROWS - 1][1], 'O');
+  assert.equal(g[ROWS - 1][0], null, 'original grid untouched');
+});
+
+test('fullRows finds a completed bottom row', () => {
+  const g = emptyGrid();
+  for (let x = 0; x < COLS; x++) g[ROWS - 1][x] = 'I';
+  assert.deepEqual(fullRows(g), [ROWS - 1]);
+});
+
+test('fullRows returns empty when no row is full', () => {
+  const g = emptyGrid();
+  g[ROWS - 1][0] = 'I';
+  assert.deepEqual(fullRows(g), []);
+});
+
+test('clearRows removes rows and shifts down', () => {
+  const g = emptyGrid();
+  for (let x = 0; x < COLS; x++) g[ROWS - 1][x] = 'I';
+  g[ROWS - 2][3] = 'T';
+  const out = clearRows(g, [ROWS - 1]);
+  assert.equal(out[ROWS - 1][3], 'T', 'cell above shifted down by one');
+  assert.ok(out[0].every(c => c === null), 'new empty row on top');
+});
+
+test('clearRows handles multiple rows', () => {
+  const g = emptyGrid();
+  for (let x = 0; x < COLS; x++) { g[ROWS - 1][x] = 'I'; g[ROWS - 2][x] = 'I'; }
+  const out = clearRows(g, fullRows(g));
+  assert.ok(out.every(row => row.every(c => c === null)));
+});

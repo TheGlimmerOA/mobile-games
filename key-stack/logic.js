@@ -57,3 +57,32 @@ export function dropY(grid, shape, px, py) {
   while (canFit(grid, shape, px, y + 1)) y += 1;
   return y;
 }
+
+export function lockPiece(grid, shape, name, px, py) {
+  const g = grid.map(r => r.slice());
+  for (let y = 0; y < shape.length; y++) {
+    for (let x = 0; x < shape[0].length; x++) {
+      if (!shape[y][x]) continue;
+      const gx = px + x, gy = py + y;
+      if (gy >= 0 && gy < ROWS && gx >= 0 && gx < COLS) g[gy][gx] = name;
+    }
+  }
+  return g;
+}
+
+// Completed row indices, highest index (bottom) first.
+export function fullRows(grid) {
+  const rows = [];
+  for (let y = ROWS - 1; y >= 0; y--) {
+    if (grid[y].every(c => c)) rows.push(y);
+  }
+  return rows;
+}
+
+export function clearRows(grid, rows) {
+  const g = grid.map(r => r.slice());
+  const sorted = rows.slice().sort((a, b) => b - a); // descending: remove bottom-up so higher indices stay valid
+  for (const y of sorted) g.splice(y, 1);
+  for (let i = 0; i < sorted.length; i++) g.unshift(Array(COLS).fill(null));
+  return g;
+}
