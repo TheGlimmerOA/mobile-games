@@ -6,7 +6,7 @@
 <title>Key Stack</title>
 <style>
   :root { color-scheme: dark; }
-  html, body { margin: 0; height: 100%; background: #10101a; overflow: hidden; }
+  html, body { margin: 0; height: 100%; background: #0b0b14; overflow: hidden; }
   body {
     /* Lock out scroll/zoom gestures during play. */
     touch-action: none;
@@ -20,21 +20,103 @@
 <canvas id="game"></canvas>
 <script type="module">
 import {
-  COLS, ROWS, COLORS, BOARD_BG, GRID, ACCENT, TEXT,
+  COLS, ROWS, COLORS, BOARD_BG, ACCENT, TEXT,
   TETRO, NAMES, rotate, emptyGrid, canFit, dropY,
-  lockPiece, fullRows, clearRows, classifyGesture, fallInterval,
-  LB_SIZE, qualifies, insertScore, sanitizeInitials, seedScores,
+  lockPiece, fullRows, clearRows, classifyGesture, fallInterval, SOFT_DROP_ROWS,
+  LB_SIZE, qualifies, insertScore, sanitizeInitials, ICONS, sanitizeIcon,
 } from './logic.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 const nowSec = () => performance.now() / 1000;
 
+// KC-family palette (QA v1.1: more color + higher-contrast grid so lines read behind pieces).
+const PANEL_BG = '#0e0e1c';
+const GRID_LINE = '#3b3b5e';        // brighter than logic GRID for visibility
+const BG_TOP = '#1a1a30';
+const BG_BOTTOM = '#08080f';
+const MONO = '"SF Mono", "JetBrains Mono", Consolas, Menlo, monospace';
+
+// ============================================================================
+// AUDIO — synthesized (no asset files): explosion SFX + low 1980s arcade bed + mute
+// ============================================================================
+const Sound = (() => {
+  let ctx = null, master = null, ambientGain = null, ambientTimer = null, started = false;
+  let muted = false;
+  try { muted = localStorage.getItem('keystack.muted') === '1'; } catch {}
+
+  function ensure() {
+    if (ctx) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    ctx = new AC();
+    master = ctx.createGain(); master.gain.value = muted ? 0 : 1; master.connect(ctx.destination);
+    ambientGain = ctx.createGain(); ambientGain.gain.value = 0.05; ambientGain.connect(master);
+  }
+  function resume() { if (ctx && ctx.state === 'suspended') ctx.resume(); }
+
+  // Called on the first user gesture so audio is allowed to play.
+  function start() {
+    ensure(); if (!ctx) return; resume();
+    if (!started) { started = true; startAmbient(); }
+  }
+
+  function explosion() {
+    ensure(); if (!ctx || muted) return; resume();
+    const t = ctx.currentTime, dur = 0.5;
+    // Noise burst through a falling low-pass = a "boom".
+    const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 2);
+    const src = ctx.createBufferSource(); src.buffer = buf;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(1800, t); lp.frequency.exponentialRampToValueAtTime(200, t + dur);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.8, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    src.connect(lp); lp.connect(g); g.connect(master); src.start(t); src.stop(t + dur);
+    // Low sine thump underneath.
+    const o = ctx.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(180, t); o.frequency.exponentialRampToValueAtTime(50, t + 0.3);
+    const og = ctx.createGain(); og.gain.setValueAtTime(0.5, t); og.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+    o.connect(og); og.connect(master); o.start(t); o.stop(t + 0.35);
+  }
+
+  // A slow, quiet arpeggio loop — arcade attract-mode feel.
+  const SEQ = [0, 3, 7, 10, 7, 3, 0, 3, 7, 12, 7, 3];
+  let step = 0;
+  function startAmbient() {
+    if (ambientTimer) return;
+    const base = 196; // G3
+    ambientTimer = setInterval(() => {
+      if (!ctx || muted) return;
+      const t = ctx.currentTime;
+      const semi = SEQ[step % SEQ.length]; step++;
+      const freq = base * Math.pow(2, semi / 12);
+      const o = ctx.createOscillator(); o.type = 'square'; o.frequency.value = freq;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(1, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.24);
+      o.connect(g); g.connect(ambientGain); o.start(t); o.stop(t + 0.26);
+    }, 300);
+  }
+
+  function toggleMute() {
+    muted = !muted;
+    try { localStorage.setItem('keystack.muted', muted ? '1' : '0'); } catch {}
+    ensure(); resume();
+    if (master) master.gain.value = muted ? 0 : 1;
+    if (!muted) start();
+    return muted;
+  }
+  function isMuted() { return muted; }
+  return { start, explosion, toggleMute, isMuted };
+})();
+
 // ============================================================================
 // LAYOUT — responsive, retina-crisp, board fills the screen (spec §6)
 // ============================================================================
-const HEADER_FRAC = 0.14;   // fraction of height reserved for score + next-piece
-const MAX_CELL = 64;        // cap so the board isn't comically blocky on big tablets
+const HEADER_FRAC = 0.14;
+const MAX_CELL = 64;
 
 const layout = { cell: 20, boardX: 0, boardY: 0, boardW: 0, boardH: 0, headerH: 0, dpr: 1, cssW: 0, cssH: 0 };
 
@@ -44,17 +126,12 @@ function resize() {
   const cssH = window.innerHeight;
   canvas.width = Math.round(cssW * dpr);
   canvas.height = Math.round(cssH * dpr);
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // draw in CSS pixels, crisp on retina
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
   const headerH = Math.round(cssH * HEADER_FRAC);
   const usableH = cssH - headerH;
-  const cell = Math.min(
-    Math.floor(cssW / COLS),
-    Math.floor(usableH / ROWS),
-    MAX_CELL
-  );
-  const boardW = cell * COLS;
-  const boardH = cell * ROWS;
+  const cell = Math.min(Math.floor(cssW / COLS), Math.floor(usableH / ROWS), MAX_CELL);
+  const boardW = cell * COLS, boardH = cell * ROWS;
   Object.assign(layout, {
     cell, boardW, boardH, headerH, dpr, cssW, cssH,
     boardX: Math.floor((cssW - boardW) / 2),
@@ -62,24 +139,43 @@ function resize() {
   });
 }
 
-function drawBoardFrame() {
-  ctx.fillStyle = BOARD_BG;
+function drawBackground() {
+  const grad = ctx.createLinearGradient(0, 0, 0, layout.cssH);
+  grad.addColorStop(0, BG_TOP);
+  grad.addColorStop(1, BG_BOTTOM);
+  ctx.fillStyle = grad;
   ctx.fillRect(0, 0, layout.cssW, layout.cssH);
-  const { cell, boardX, boardY } = layout;
-  ctx.strokeStyle = GRID;
+}
+
+function drawBoardFrame() {
+  drawBackground();
+  const { cell, boardX, boardY, boardW, boardH } = layout;
+  // Panel behind the playfield, with an accent glow border (KC family).
+  ctx.save();
+  ctx.shadowColor = 'rgba(100,200,255,0.35)';
+  ctx.shadowBlur = Math.max(8, cell * 0.5);
+  ctx.fillStyle = PANEL_BG;
+  ctx.fillRect(boardX, boardY, boardW, boardH);
+  ctx.restore();
+  // Grid lines — brighter for contrast.
+  ctx.strokeStyle = GRID_LINE;
   ctx.lineWidth = 1;
   for (let c = 0; c <= COLS; c++) {
     ctx.beginPath();
-    ctx.moveTo(boardX + c * cell, boardY);
-    ctx.lineTo(boardX + c * cell, boardY + layout.boardH);
+    ctx.moveTo(boardX + c * cell + 0.5, boardY);
+    ctx.lineTo(boardX + c * cell + 0.5, boardY + boardH);
     ctx.stroke();
   }
   for (let r = 0; r <= ROWS; r++) {
     ctx.beginPath();
-    ctx.moveTo(boardX, boardY + r * cell);
-    ctx.lineTo(boardX + layout.boardW, boardY + r * cell);
+    ctx.moveTo(boardX, boardY + r * cell + 0.5);
+    ctx.lineTo(boardX + boardW, boardY + r * cell + 0.5);
     ctx.stroke();
   }
+  // Accent border.
+  ctx.strokeStyle = ACCENT;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(boardX - 1, boardY - 1, boardW + 2, boardH + 2);
 }
 
 // ============================================================================
@@ -90,16 +186,16 @@ const G = {
   piece: TETRO.T, name: 'T', px: 3, py: 0,
   next: 'O',
   score: 0, best: 0,
-  state: 'start',   // start | play | entry | board
+  state: 'start',   // start | play | entry | iconpick | board
   startedAt: 0,
 };
 
-let testMult = 1;     // toggled by the dev hotkey
+let testMult = 1;
 let lastFall = 0;
 let overGuardUntil = 0;
 
 // ============================================================================
-// LEADERBOARD storage (spec §11) — storage-safe
+// LEADERBOARD storage (spec §11) — empty at start (QA v1.1), storage-safe
 // ============================================================================
 const LB_KEY = 'keystack.highscores';
 let scores = loadScores();
@@ -107,43 +203,43 @@ let scores = loadScores();
 function loadScores() {
   try {
     const raw = localStorage.getItem(LB_KEY);
-    if (!raw) return seedScores();
+    if (!raw) return [];
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return seedScores();
-    const clean = parsed
+    if (!Array.isArray(parsed)) return [];
+    return parsed
       .filter(e => e && typeof e.score === 'number' && typeof e.initials === 'string')
-      .map(e => ({ initials: sanitizeInitials(e.initials), score: e.score | 0 }))
+      .map(e => ({ initials: sanitizeInitials(e.initials), score: e.score | 0, icon: sanitizeIcon(e.icon) }))
       .sort((a, b) => b.score - a.score)
       .slice(0, LB_SIZE);
-    return clean.length ? clean : seedScores();
-  } catch { return seedScores(); }  // private mode / blocked storage
+  } catch { return []; }
 }
-
 function saveScores() {
-  try { localStorage.setItem(LB_KEY, JSON.stringify(scores)); } catch { /* in-memory only */ }
+  try { localStorage.setItem(LB_KEY, JSON.stringify(scores)); } catch {}
 }
 
-// ---- Initials entry ---------------------------------------------------------
-const ENTRY_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ. '; // wraps; space and '.' allowed
-const entry = { slots: ['A', 'A', 'A'], active: 0, score: 0 };
-let entryButtons = [];   // hit-boxes rebuilt each render: {x,y,w,h,action,slot?}
+// ---- Initials + icon entry --------------------------------------------------
+const ENTRY_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ. ';
+const entry = { slots: ['A', 'A', 'A'], active: 0, score: 0, icon: ICONS[0] };
+let entryButtons = [];
+let iconButtons = [];
 
 function beginEntry(score) {
   entry.slots = ['A', 'A', 'A'];
   entry.active = 0;
   entry.score = score;
+  entry.icon = ICONS[0];
   G.state = 'entry';
 }
-
 function cycleSlot(dir) {
   const i = ENTRY_CHARS.indexOf(entry.slots[entry.active]);
-  const n = (i + dir + ENTRY_CHARS.length) % ENTRY_CHARS.length;
-  entry.slots[entry.active] = ENTRY_CHARS[n];
+  entry.slots[entry.active] = ENTRY_CHARS[(i + dir + ENTRY_CHARS.length) % ENTRY_CHARS.length];
 }
-
 function submitEntry() {
-  const initials = sanitizeInitials(entry.slots.join(''));
-  scores = insertScore(scores, { initials, score: entry.score });
+  scores = insertScore(scores, {
+    initials: sanitizeInitials(entry.slots.join('')),
+    score: entry.score,
+    icon: sanitizeIcon(entry.icon),
+  });
   saveScores();
   G.state = 'board';
 }
@@ -156,133 +252,171 @@ function drawCell(gx, gy, name) {
   const x = boardX + gx * cell, y = boardY + gy * cell;
   ctx.fillStyle = COLORS[name] || ACCENT;
   ctx.fillRect(x + 1, y + 1, cell - 2, cell - 2);
-  ctx.fillStyle = 'rgba(255,255,255,0.10)';
-  ctx.fillRect(x + 1, y + 1, cell - 2, Math.max(2, cell * 0.12));
+  ctx.fillStyle = 'rgba(255,255,255,0.14)';
+  ctx.fillRect(x + 1, y + 1, cell - 2, Math.max(2, cell * 0.14));
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.fillRect(x + 1, y + cell - Math.max(2, cell * 0.14) - 1, cell - 2, Math.max(2, cell * 0.14));
 }
-
 function drawPiece(shape, name, px, py) {
   for (let y = 0; y < shape.length; y++)
     for (let x = 0; x < shape[0].length; x++)
       if (shape[y][x] && py + y >= 0) drawCell(px + x, py + y, name);
 }
-
 function drawHeader() {
   const { headerH, cssW, cell } = layout;
   const pad = Math.round(headerH * 0.18);
   const fs = Math.max(16, Math.round(headerH * 0.34));
-  ctx.fillStyle = TEXT;
-  ctx.textBaseline = 'middle';
-  ctx.font = `600 ${fs}px "SF Mono", Consolas, Menlo, monospace`;
-  ctx.textAlign = 'left';
-  ctx.fillText(`LINES ${G.score}`, pad, headerH / 2);
+  const leftX = pad + Math.min(46, headerH * 0.5) + 12; // leave room for the mute button
+  ctx.fillStyle = TEXT; ctx.textBaseline = 'middle';
+  ctx.font = `600 ${fs}px ${MONO}`; ctx.textAlign = 'left';
+  ctx.fillText(`LINES ${G.score}`, leftX, headerH / 2);
   const shape = TETRO[G.next];
   const nc = Math.max(8, Math.round(cell * 0.55));
-  const pw = shape[0].length * nc, ph = shape.length * nc;
-  const nx = cssW - pad - pw, ny = (headerH - ph) / 2 + headerH * 0.08;
-  ctx.fillStyle = TEXT;
-  ctx.textAlign = 'right';
-  ctx.font = `500 ${Math.round(fs * 0.7)}px "SF Mono", Consolas, Menlo, monospace`;
+  const pw = shape[0].length * nc;
+  const nx = cssW - pad - pw, ny = (headerH - shape.length * nc) / 2 + headerH * 0.08;
+  ctx.fillStyle = TEXT; ctx.textAlign = 'right';
+  ctx.font = `500 ${Math.round(fs * 0.7)}px ${MONO}`;
   ctx.fillText('NEXT', cssW - pad, headerH * 0.22);
   for (let y = 0; y < shape.length; y++)
     for (let x = 0; x < shape[0].length; x++)
-      if (shape[y][x]) {
-        ctx.fillStyle = COLORS[G.next];
-        ctx.fillRect(nx + x * nc + 1, ny + y * nc + 1, nc - 2, nc - 2);
-      }
+      if (shape[y][x]) { ctx.fillStyle = COLORS[G.next]; ctx.fillRect(nx + x * nc + 1, ny + y * nc + 1, nc - 2, nc - 2); }
+}
+
+let muteBtn = { x: 0, y: 0, w: 0, h: 0 };
+function drawMute() {
+  const s = Math.min(46, Math.max(30, layout.headerH * 0.5));
+  const pad = Math.round(layout.headerH * 0.18);
+  muteBtn = { x: pad, y: pad, w: s, h: s };
+  ctx.font = `${Math.round(s * 0.7)}px ${MONO}`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(Sound.isMuted() ? '🔇' : '🔊', muteBtn.x + s / 2, muteBtn.y + s / 2 + 1);
 }
 
 function drawOverlay(title, lines) {
-  ctx.fillStyle = 'rgba(16,16,26,0.82)';
+  ctx.fillStyle = 'rgba(11,11,20,0.86)';
   ctx.fillRect(0, 0, layout.cssW, layout.cssH);
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'alphabetic';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
   ctx.fillStyle = ACCENT;
   const tfs = Math.max(28, Math.round(layout.cssH * 0.06));
-  ctx.font = `700 ${tfs}px "SF Mono", Consolas, Menlo, monospace`;
-  ctx.fillText(title, layout.cssW / 2, layout.cssH * 0.32);
+  ctx.font = `700 ${tfs}px ${MONO}`;
+  ctx.fillText(title, layout.cssW / 2, layout.cssH * 0.30);
   ctx.fillStyle = TEXT;
-  const lfs = Math.max(16, Math.round(layout.cssH * 0.03));
-  ctx.font = `500 ${lfs}px "SF Mono", Consolas, Menlo, monospace`;
-  lines.forEach((ln, i) => ctx.fillText(ln, layout.cssW / 2, layout.cssH * 0.46 + i * lfs * 1.6));
+  const lfs = Math.max(15, Math.round(layout.cssH * 0.028));
+  ctx.font = `500 ${lfs}px ${MONO}`;
+  lines.forEach((ln, i) => ctx.fillText(ln, layout.cssW / 2, layout.cssH * 0.44 + i * lfs * 1.7));
 }
 
-function drawButton(x, y, w, h, label) {
-  ctx.fillStyle = 'rgba(100,200,255,0.08)';
+function drawButton(x, y, w, h, label, active) {
+  ctx.fillStyle = active ? 'rgba(100,200,255,0.20)' : 'rgba(100,200,255,0.08)';
   ctx.strokeStyle = ACCENT; ctx.lineWidth = 2;
   ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h);
   ctx.fillStyle = TEXT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.font = `600 ${Math.round(h * 0.5)}px "SF Mono", Consolas, Menlo, monospace`;
+  ctx.font = `600 ${Math.round(h * 0.5)}px ${MONO}`;
   ctx.fillText(label, x + w / 2, y + h / 2);
 }
 
 function drawEntry() {
   const W = layout.cssW, H = layout.cssH;
-  // Self-contained overlay (own title/score placement so nothing collides).
-  ctx.fillStyle = 'rgba(16,16,26,0.9)';
-  ctx.fillRect(0, 0, W, H);
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillStyle = ACCENT;
-  ctx.font = `700 ${Math.max(24, Math.round(H * 0.05))}px "SF Mono", Consolas, Menlo, monospace`;
+  ctx.fillStyle = 'rgba(11,11,20,0.92)'; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = ACCENT;
+  ctx.font = `700 ${Math.max(24, Math.round(H * 0.05))}px ${MONO}`;
   ctx.fillText('NEW HIGH SCORE!', W / 2, H * 0.13);
-  ctx.fillStyle = TEXT;
-  ctx.font = `500 ${Math.max(15, Math.round(H * 0.028))}px "SF Mono", Consolas, Menlo, monospace`;
+  ctx.fillStyle = TEXT; ctx.font = `500 ${Math.max(15, Math.round(H * 0.028))}px ${MONO}`;
   ctx.fillText(`Lines: ${entry.score}`, W / 2, H * 0.21);
   ctx.fillText('Enter your initials', W / 2, H * 0.26);
 
-  // Box size capped against BOTH dimensions so it never overflows on wide/landscape screens.
   const cw = Math.max(44, Math.min(W * 0.2, H * 0.12, 96));
-  const gap = Math.round(cw * 0.28);
-  const bh = Math.round(cw * 0.62);
-  const totalW = cw * 3 + gap * 2;
-  const x0 = (W - totalW) / 2;
-  const midY = H * 0.56;               // vertical center of the letter boxes
-  const boxTop = midY - cw / 2;
-  const upY = boxTop - gap - bh;
-  const downY = boxTop + cw + gap;
+  const gap = Math.round(cw * 0.28), bh = Math.round(cw * 0.62);
+  const totalW = cw * 3 + gap * 2, x0 = (W - totalW) / 2;
+  const midY = H * 0.55, boxTop = midY - cw / 2;
+  const upY = boxTop - gap - bh, downY = boxTop + cw + gap;
 
   entryButtons = [];
   for (let i = 0; i < 3; i++) {
     const x = x0 + i * (cw + gap);
-    drawButton(x, upY, cw, bh, '▲');       // up
-    drawButton(x, downY, cw, bh, '▼');      // down
+    drawButton(x, upY, cw, bh, '▲');
+    drawButton(x, downY, cw, bh, '▼');
     entryButtons.push({ x, y: upY, w: cw, h: bh, action: 'up', slot: i });
     entryButtons.push({ x, y: downY, w: cw, h: bh, action: 'down', slot: i });
     ctx.fillStyle = i === entry.active ? 'rgba(100,200,255,0.18)' : 'rgba(255,255,255,0.04)';
     ctx.fillRect(x, boxTop, cw, cw);
-    ctx.strokeStyle = i === entry.active ? ACCENT : GRID; ctx.lineWidth = 2;
+    ctx.strokeStyle = i === entry.active ? ACCENT : GRID_LINE; ctx.lineWidth = 2;
     ctx.strokeRect(x, boxTop, cw, cw);
     ctx.fillStyle = TEXT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = `700 ${Math.round(cw * 0.6)}px "SF Mono", Consolas, Menlo, monospace`;
+    ctx.font = `700 ${Math.round(cw * 0.6)}px ${MONO}`;
     ctx.fillText(entry.slots[i] === ' ' ? '␣' : entry.slots[i], x + cw / 2, midY);
     entryButtons.push({ x, y: boxTop, w: cw, h: cw, action: 'select', slot: i });
   }
-  const dw = totalW, dh = Math.round(bh * 1.1), dy = downY + bh + gap;
+  const dw = totalW, dh = Math.round(bh * 1.15), dy = downY + bh + gap;
+  drawButton(x0, dy, dw, dh, 'NEXT');
+  entryButtons.push({ x: x0, y: dy, w: dw, h: dh, action: 'next' });
+}
+
+function drawIconPick() {
+  const W = layout.cssW, H = layout.cssH;
+  ctx.fillStyle = 'rgba(11,11,20,0.92)'; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = ACCENT;
+  ctx.font = `700 ${Math.max(22, Math.round(H * 0.045))}px ${MONO}`;
+  ctx.fillText('PICK YOUR ICON', W / 2, H * 0.13);
+
+  const cols = 5, rows = Math.ceil(ICONS.length / cols);
+  const size = Math.max(44, Math.min(W * 0.16, H * 0.1, 84));
+  const gap = Math.round(size * 0.25);
+  const gridW = cols * size + (cols - 1) * gap;
+  const x0 = (W - gridW) / 2, y0 = H * 0.24;
+
+  iconButtons = [];
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (let i = 0; i < ICONS.length; i++) {
+    const r = Math.floor(i / cols), c = i % cols;
+    const x = x0 + c * (size + gap), y = y0 + r * (size + gap);
+    const sel = ICONS[i] === entry.icon;
+    ctx.fillStyle = sel ? 'rgba(100,200,255,0.22)' : 'rgba(255,255,255,0.04)';
+    ctx.fillRect(x, y, size, size);
+    ctx.strokeStyle = sel ? ACCENT : GRID_LINE; ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, size, size);
+    ctx.font = `${Math.round(size * 0.6)}px ${MONO}`;
+    ctx.fillStyle = TEXT;
+    ctx.fillText(ICONS[i], x + size / 2, y + size / 2 + 2);
+    iconButtons.push({ x, y, w: size, h: size, icon: ICONS[i] });
+  }
+  const dw = gridW, dh = Math.round(size * 0.8), dy = y0 + rows * (size + gap) + gap;
   drawButton(x0, dy, dw, dh, 'DONE');
-  entryButtons.push({ x: x0, y: dy, w: dw, h: dh, action: 'done' });
+  iconButtons.push({ x: x0, y: dy, w: dw, h: dh, action: 'done' });
 }
 
 function drawBoard() {
-  ctx.fillStyle = BOARD_BG; ctx.fillRect(0, 0, layout.cssW, layout.cssH);
+  drawBackground();
+  const W = layout.cssW, H = layout.cssH;
   ctx.fillStyle = ACCENT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  const tfs = Math.max(26, Math.round(layout.cssH * 0.055));
-  ctx.font = `700 ${tfs}px "SF Mono", Consolas, Menlo, monospace`;
-  ctx.fillText('HIGH SCORES', layout.cssW / 2, layout.cssH * 0.1);
-  const rfs = Math.max(15, Math.round(layout.cssH * 0.032));
-  ctx.font = `500 ${rfs}px "SF Mono", Consolas, Menlo, monospace`;
-  const x0 = layout.cssW * 0.5 - Math.min(layout.cssW * 0.42, 220);
-  const x1 = layout.cssW * 0.5 + Math.min(layout.cssW * 0.42, 220);
-  const top = layout.cssH * 0.2;
+  ctx.font = `700 ${Math.max(26, Math.round(H * 0.055))}px ${MONO}`;
+  ctx.fillText('HIGH SCORES', W / 2, H * 0.1);
+
+  const rfs = Math.max(15, Math.round(H * 0.032));
   const newInitials = sanitizeInitials(entry.slots.join(''));
-  scores.forEach((e, i) => {
-    const y = top + i * rfs * 1.7;
-    const isNew = G.state === 'board' && e.score === entry.score && e.initials === newInitials;
-    ctx.fillStyle = isNew ? ACCENT : TEXT;
-    ctx.textAlign = 'left';  ctx.fillText(`${String(i + 1).padStart(2, ' ')}  ${e.initials}`, x0, y);
-    ctx.textAlign = 'right'; ctx.fillText(String(e.score), x1, y);
-  });
-  ctx.fillStyle = TEXT; ctx.textAlign = 'center';
-  ctx.font = `500 ${rfs}px "SF Mono", Consolas, Menlo, monospace`;
-  ctx.fillText('Tap to play again', layout.cssW / 2, layout.cssH * 0.92);
+  if (scores.length === 0) {
+    ctx.fillStyle = TEXT; ctx.font = `500 ${rfs}px ${MONO}`;
+    ctx.fillText('NO SCORES YET', W / 2, H * 0.42);
+    ctx.fillStyle = ACCENT;
+    ctx.fillText('BE THE FIRST!', W / 2, H * 0.42 + rfs * 1.8);
+  } else {
+    ctx.font = `500 ${rfs}px ${MONO}`;
+    const half = Math.min(W * 0.42, 240);
+    const rankX = W / 2 - half, iconX = W / 2 - half + rfs * 3, initX = iconX + rfs * 1.6, scoreX = W / 2 + half;
+    const top = H * 0.2;
+    scores.forEach((e, i) => {
+      const y = top + i * rfs * 1.7;
+      const isNew = G.state === 'board' && e.score === entry.score
+        && e.initials === newInitials && e.icon === sanitizeIcon(entry.icon);
+      ctx.fillStyle = isNew ? ACCENT : TEXT;
+      ctx.textAlign = 'left';  ctx.fillText(`${String(i + 1).padStart(2, ' ')}`, rankX, y);
+      ctx.textAlign = 'center'; ctx.fillText(e.icon || ICONS[0], iconX, y);
+      ctx.textAlign = 'left';  ctx.fillText(e.initials, initX, y);
+      ctx.textAlign = 'right'; ctx.fillText(String(e.score), scoreX, y);
+    });
+  }
+  ctx.fillStyle = TEXT; ctx.textAlign = 'center'; ctx.font = `500 ${rfs}px ${MONO}`;
+  ctx.fillText('Tap to play again', W / 2, H * 0.92);
 }
 
 function render() {
@@ -295,39 +429,40 @@ function render() {
   if (G.state === 'start' || G.state === 'play') drawHeader();
   if (G.state === 'start') {
     drawOverlay('KEY STACK', [
-      `Best: ${scores[0] ? scores[0].score : 0}`,
+      'GLIMMER LEARNING',
+      '',
+      scores[0] ? `Best: ${scores[0].score} ${scores[0].icon || ''}` : 'Be the first to score!',
       'Tap to play',
       'Swipe = move · Tap = rotate',
-      'Swipe down = drop',
+      'Swipe down = lower the piece',
     ]);
   }
   if (G.state === 'entry') drawEntry();
+  if (G.state === 'iconpick') drawIconPick();
   if (G.state === 'board') drawBoard();
+  drawMute(); // always on top so it's tappable in every state
 }
 
 // ============================================================================
 // PARTICLES (line-clear fanfare)
 // ============================================================================
 let particles = [];
-
 function spawnFlash(rows) {
   const { cell, boardX, boardY } = layout;
   for (const ry of rows) for (let x = 0; x < COLS; x++) {
     particles.push({
       x: boardX + (x + 0.5) * cell, y: boardY + (ry + 0.5) * cell,
-      vx: (Math.random() - 0.5) * 120, vy: (Math.random() - 0.5) * 120, life: 0.4,
+      vx: (Math.random() - 0.5) * 160, vy: (Math.random() - 0.5) * 160, life: 0.45,
     });
   }
 }
-
 function updateParticles(dt) {
   for (const p of particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
   particles = particles.filter(p => p.life > 0);
 }
-
 function drawParticles() {
   for (const p of particles) {
-    ctx.globalAlpha = Math.max(0, p.life / 0.4);
+    ctx.globalAlpha = Math.max(0, p.life / 0.45);
     ctx.fillStyle = ACCENT;
     ctx.fillRect(p.x, p.y, 3, 3);
   }
@@ -338,56 +473,46 @@ function drawParticles() {
 // GAME LOGIC
 // ============================================================================
 function randName() { return NAMES[Math.floor(Math.random() * NAMES.length)]; }
-
 function spawn() {
-  G.name = G.next;
-  G.next = randName();
+  G.name = G.next; G.next = randName();
   G.piece = TETRO[G.name];
-  G.px = Math.floor((COLS - G.piece[0].length) / 2);
-  G.py = 0;
+  G.px = Math.floor((COLS - G.piece[0].length) / 2); G.py = 0;
   if (!canFit(G.grid, G.piece, G.px, G.py)) endRound();
 }
-
 function startRound() {
-  G.grid = emptyGrid();
-  G.score = 0;
-  particles = [];
-  G.next = randName();
-  G.state = 'play';
-  G.startedAt = nowSec();
-  lastFall = nowSec();
+  G.grid = emptyGrid(); G.score = 0; particles = [];
+  G.next = randName(); G.state = 'play';
+  G.startedAt = nowSec(); lastFall = nowSec();
   spawn();
 }
-
-function tryMove(dcol) {
-  if (G.state !== 'play') return;
-  if (canFit(G.grid, G.piece, G.px + dcol, G.py)) G.px += dcol;
-}
-
+function tryMove(dcol) { if (G.state === 'play' && canFit(G.grid, G.piece, G.px + dcol, G.py)) G.px += dcol; }
 function tryRotate() {
   if (G.state !== 'play') return;
   const r = rotate(G.piece);
   if (canFit(G.grid, r, G.px, G.py)) G.piece = r;
 }
-
 function lockAndResolve() {
   G.grid = lockPiece(G.grid, G.piece, G.name, G.px, G.py);
   const rows = fullRows(G.grid);
   if (rows.length) {
     spawnFlash(rows);
+    Sound.explosion();
     G.grid = clearRows(G.grid, rows);
     G.score += rows.length;
   }
   spawn();
   lastFall = nowSec();
 }
-
-function hardDrop() {
+// Soft drop (QA v1.1): lower a few rows per swipe; if already resting, lock it.
+function softDrop(rows) {
   if (G.state !== 'play') return;
-  G.py = dropY(G.grid, G.piece, G.px, G.py);
-  lockAndResolve();
+  let moved = 0;
+  for (let i = 0; i < rows; i++) {
+    if (canFit(G.grid, G.piece, G.px, G.py + 1)) { G.py += 1; moved++; } else break;
+  }
+  if (moved === 0) lockAndResolve();
+  else lastFall = nowSec();
 }
-
 function step() {
   if (G.state !== 'play') return;
   const t = nowSec();
@@ -398,7 +523,6 @@ function step() {
     else lockAndResolve();
   }
 }
-
 function endRound() {
   G.best = Math.max(G.best, G.score);
   overGuardUntil = nowSec() + 0.8;
@@ -412,50 +536,46 @@ function endRound() {
 let lastFrame = nowSec();
 function frame() {
   const t = nowSec();
-  const dt = Math.min(0.05, t - lastFrame);
-  lastFrame = t;
-  step();
-  updateParticles(dt);
-  render();
+  const dt = Math.min(0.05, t - lastFrame); lastFrame = t;
+  step(); updateParticles(dt); render();
   requestAnimationFrame(frame);
 }
 
 // ============================================================================
-// INPUT (touch)
+// INPUT
 // ============================================================================
 let touchStart = null;
-
 function ptFromEvent(ev) {
   const r = canvas.getBoundingClientRect();
   const t = ev.changedTouches ? ev.changedTouches[0] : ev;
   return { x: t.clientX - r.left, y: t.clientY - r.top };
 }
+function inRect(p, b) { return p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h; }
 
-canvas.addEventListener('touchstart', (ev) => {
-  ev.preventDefault();
-  const p = ptFromEvent(ev);
-  touchStart = { x: p.x, y: p.y, t: nowSec() };
-}, { passive: false });
-
-canvas.addEventListener('touchend', (ev) => {
-  ev.preventDefault();
-  if (!touchStart) return;
-  const p = ptFromEvent(ev);
-  const dx = p.x - touchStart.x, dy = p.y - touchStart.y;
-  touchStart = null;
+// Shared gesture resolver for both touch and mouse.
+function handleGesture(p, dx, dy) {
+  Sound.start(); // first user gesture unlocks/init audio
+  if (inRect(p, muteBtn)) { Sound.toggleMute(); return; }
 
   if (G.state === 'start') { startRound(); return; }
 
   if (G.state === 'entry') {
     if (Math.abs(dy) > 24 && Math.abs(dy) > Math.abs(dx)) { cycleSlot(dy < 0 ? 1 : -1); return; }
-    for (const b of entryButtons) {
-      if (p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h) {
-        if (b.action === 'select') entry.active = b.slot;
-        else if (b.action === 'up')   { entry.active = b.slot; cycleSlot(1); }
-        else if (b.action === 'down') { entry.active = b.slot; cycleSlot(-1); }
-        else if (b.action === 'done') submitEntry();
-        return;
-      }
+    for (const b of entryButtons) if (inRect(p, b)) {
+      if (b.action === 'select') entry.active = b.slot;
+      else if (b.action === 'up')   { entry.active = b.slot; cycleSlot(1); }
+      else if (b.action === 'down') { entry.active = b.slot; cycleSlot(-1); }
+      else if (b.action === 'next') G.state = 'iconpick';
+      return;
+    }
+    return;
+  }
+
+  if (G.state === 'iconpick') {
+    for (const b of iconButtons) if (inRect(p, b)) {
+      if (b.action === 'done') submitEntry();
+      else entry.icon = b.icon;
+      return;
     }
     return;
   }
@@ -466,36 +586,29 @@ canvas.addEventListener('touchend', (ev) => {
   const g = classifyGesture(dx, dy, layout.cell);
   if (g.type === 'tap') tryRotate();
   else if (g.type === 'move') { for (let i = 0; i < g.cols; i++) tryMove(g.dir); }
-  else if (g.type === 'harddrop') hardDrop();
+  else if (g.type === 'softdrop') softDrop(g.rows);
+}
+
+canvas.addEventListener('touchstart', (ev) => {
+  ev.preventDefault();
+  const p = ptFromEvent(ev);
+  touchStart = { x: p.x, y: p.y };
+}, { passive: false });
+canvas.addEventListener('touchend', (ev) => {
+  ev.preventDefault();
+  if (!touchStart) return;
+  const p = ptFromEvent(ev);
+  handleGesture(p, p.x - touchStart.x, p.y - touchStart.y);
+  touchStart = null;
 }, { passive: false });
 
-// Mouse fallback for desktop testing (tap = click, no drag support needed).
-canvas.addEventListener('mousedown', (ev) => { touchStart = { x: ev.clientX, y: ev.clientY, t: nowSec() }; });
+// Mouse fallback for desktop testing.
+canvas.addEventListener('mousedown', (ev) => { const p = ptFromEvent(ev); touchStart = { x: p.x, y: p.y }; });
 canvas.addEventListener('mouseup', (ev) => {
   if (!touchStart) return;
-  const dx = ev.clientX - touchStart.x, dy = ev.clientY - touchStart.y;
-  const r = canvas.getBoundingClientRect();
-  const p = { x: ev.clientX - r.left, y: ev.clientY - r.top };
+  const p = ptFromEvent(ev);
+  handleGesture(p, p.x - touchStart.x, p.y - touchStart.y);
   touchStart = null;
-  if (G.state === 'start') { startRound(); return; }
-  if (G.state === 'entry') {
-    for (const b of entryButtons) {
-      if (p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h) {
-        if (b.action === 'select') entry.active = b.slot;
-        else if (b.action === 'up')   { entry.active = b.slot; cycleSlot(1); }
-        else if (b.action === 'down') { entry.active = b.slot; cycleSlot(-1); }
-        else if (b.action === 'done') submitEntry();
-        return;
-      }
-    }
-    return;
-  }
-  if (G.state === 'board') { if (nowSec() >= overGuardUntil) G.state = 'start'; return; }
-  if (G.state !== 'play') return;
-  const g = classifyGesture(dx, dy, layout.cell);
-  if (g.type === 'tap') tryRotate();
-  else if (g.type === 'move') { for (let i = 0; i < g.cols; i++) tryMove(g.dir); }
-  else if (g.type === 'harddrop') hardDrop();
 });
 
 // ============================================================================
@@ -516,8 +629,7 @@ window.addEventListener('orientationchange', resize);
 resize();
 requestAnimationFrame(frame);
 
-// Expose a little state for manual poking / smoke tests.
-window.__ks = { G, layout };
+window.__ks = { G, layout, Sound };
 </script>
 </body>
 </html>

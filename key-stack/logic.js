@@ -87,6 +87,10 @@ export function clearRows(grid, rows) {
   return g;
 }
 
+// Rows a single downward swipe lowers the piece (QA v1.1: soft drop, not slam-to-bottom —
+// ~3 swipes to reach the floor of an 18-row board).
+export const SOFT_DROP_ROWS = 6;
+
 // Classify a touch by net displacement (evaluated on touchend). dead-zone = tapMax px.
 export function classifyGesture(dx, dy, cellW, tapMax = 12) {
   if (Math.abs(dx) < tapMax && Math.abs(dy) < tapMax) return { type: 'tap' };
@@ -94,14 +98,15 @@ export function classifyGesture(dx, dy, cellW, tapMax = 12) {
     const cols = Math.max(1, Math.round(Math.abs(dx) / cellW));
     return { type: 'move', dir: dx > 0 ? 1 : -1, cols };
   }
-  if (dy > 0) return { type: 'harddrop' };
+  if (dy > 0) return { type: 'softdrop', rows: SOFT_DROP_ROWS };
   return { type: 'none' }; // upward swipe: unused in gameplay
 }
 
-// Seconds per row. Ramps 0.9 -> 0.25 over ~12s of play; testMult speeds it up.
+// Seconds per row. Slowed for reaction time (QA v1.1): ramps 1.3 -> 0.5 over ~20s of
+// play; testMult speeds it up.
 export function fallInterval(elapsedSec, testMult = 1) {
-  const ramp = Math.min(1, elapsedSec / 12);
-  const iv = Math.max(0.25, 0.9 - ramp * 0.65);
+  const ramp = Math.min(1, elapsedSec / 20);
+  const iv = Math.max(0.5, 1.3 - ramp * 0.8);
   return iv / testMult;
 }
 
@@ -131,7 +136,12 @@ export function sanitizeInitials(str) {
   return chars.slice(0, 3).join('');
 }
 
-export function seedScores() {
-  const names = ['GLM', 'MAY', 'ACE', 'BOT', 'KEY', 'ZAP', 'FOX', 'JET', 'OWL', 'AAA'];
-  return names.map((initials, i) => ({ initials, score: 100 - i * 10 }));
+// Profile icons (QA v1.1): license-free Unicode emoji — no third-party character art.
+// The chosen icon becomes a column in the leaderboard.
+export const ICONS = ['🐱', '🦊', '🤖', '🐶', '🐸', '🦉', '👾', '⭐', '🎮', '🐢'];
+//                     cat          fox          robot        dog          frog         owl          alien        star     game pad     turtle
+
+// Fall back to the first icon for anything not in the set.
+export function sanitizeIcon(icon) {
+  return ICONS.includes(icon) ? icon : ICONS[0];
 }

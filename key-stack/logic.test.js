@@ -133,25 +133,27 @@ test('leftward swipe moves left at least one column', () => {
   assert.ok(r.cols >= 1);
 });
 
-test('downward swipe is hard drop', () => {
-  assert.equal(classifyGesture(5, 80, 30).type, 'harddrop');
+test('downward swipe is a soft drop of a few rows', () => {
+  const r = classifyGesture(5, 80, 30);
+  assert.equal(r.type, 'softdrop');
+  assert.ok(r.rows >= 3 && r.rows <= 9);
 });
 
 test('upward swipe is none (no gameplay action)', () => {
   assert.equal(classifyGesture(4, -80, 30).type, 'none');
 });
 
-test('fallInterval starts near 0.9 and floors at 0.25', () => {
-  assert.ok(Math.abs(fallInterval(0) - 0.9) < 1e-9);
-  assert.ok(fallInterval(1000) >= 0.25 - 1e-9);
-  assert.ok(fallInterval(1000) <= 0.26);
+test('fallInterval starts near 1.3 and floors at 0.5', () => {
+  assert.ok(Math.abs(fallInterval(0) - 1.3) < 1e-9);
+  assert.ok(fallInterval(1000) >= 0.5 - 1e-9);
+  assert.ok(fallInterval(1000) <= 0.51);
 });
 
 test('fallInterval respects the test multiplier', () => {
-  assert.ok(Math.abs(fallInterval(0, 5) - 0.18) < 1e-9);
+  assert.ok(Math.abs(fallInterval(0, 5) - 0.26) < 1e-9);
 });
 
-import { LB_SIZE, qualifies, insertScore, sanitizeInitials, seedScores } from './logic.js';
+import { LB_SIZE, qualifies, insertScore, sanitizeInitials, ICONS, sanitizeIcon } from './logic.js';
 
 const full = Array.from({ length: 10 }, (_, i) => ({ initials: 'AAA', score: 100 - i * 10 }));
 
@@ -192,8 +194,18 @@ test('sanitizeInitials upper-cases, filters, pads to 3', () => {
   assert.equal(sanitizeInitials('abcd'), 'ABC');
 });
 
-test('seedScores returns a valid descending top-10', () => {
-  const s = seedScores();
-  assert.equal(s.length, LB_SIZE);
-  for (let i = 1; i < s.length; i++) assert.ok(s[i - 1].score >= s[i].score);
+test('ICONS is a non-empty set of single glyphs', () => {
+  assert.ok(Array.isArray(ICONS) && ICONS.length >= 4);
+  assert.equal(new Set(ICONS).size, ICONS.length); // no duplicates
+});
+
+test('sanitizeIcon returns a known icon, defaulting to the first', () => {
+  assert.equal(sanitizeIcon(ICONS[2]), ICONS[2]);
+  assert.equal(sanitizeIcon('not-an-icon'), ICONS[0]);
+  assert.equal(sanitizeIcon(undefined), ICONS[0]);
+});
+
+test('insertScore preserves an icon field', () => {
+  const out = insertScore([], { initials: 'MAY', score: 5, icon: ICONS[1] });
+  assert.equal(out[0].icon, ICONS[1]);
 });

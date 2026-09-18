@@ -1,6 +1,6 @@
 # Glimmer Learning — Mobile Games (Plan)
 
-**Status:** Built & pushed to GitHub 2026-09-18 — pending GitHub Pages enable + real-device QA. Recorded 2026-09-17; spec written 2026-09-18.
+**Status:** Built & pushed to GitHub 2026-09-18 (v1.1 QA revisions applied same day) — pending GitHub Pages enable + real-device QA. Recorded 2026-09-17; spec written 2026-09-18.
 **Owner:** May Tickner Everest / Glimmer Learning
 **Spec:** `build-notes/key_stack_v1_spec.md` · **Plan:** `build-notes/2026-09-18-key-stack-v1-plan.md`.
 **Repo:** https://github.com/TheGlimmerOA/mobile-games (public). Local repo git-inited here; 34 logic unit tests pass (`node --test`); browser-verified in Chrome. Commit emails use the GitHub noreply address (172157533+TheGlimmerOA@users.noreply.github.com) because the account blocks private-email pushes.
@@ -15,11 +15,12 @@ Mobile visitors to glimmerlearning.com currently have nothing to *do* — Keyboa
 - **Function:** a classic Tetris-style falling-block stacker. Pieces fall, fill and clear rows, endless play, score by lines/points.
 - **Look:** carry over Keyboard Commander's Key Stack colors and visual design (piece colors, board styling) so it reads as part of the same family.
 - **No typing:** remove the lettered pieces and the keyboard/arrow controls entirely. This is *not* a typing game — it's the stacking mechanic on its own.
-- **Touch controls** (finalized in spec §4 — double-tap dropped because it collides with tap-to-rotate):
+- **Touch controls** (spec §4/§13):
   - Swipe left / right = move the piece left / right
   - Tap = rotate
-  - Swipe down = place (hard drop)
-- **Leaderboard:** classic 1980s-arcade high-score table (spec §11) — top 10, 3-initial entry, saved **on-device** (localStorage; no backend). Global/shared board is a later upgrade.
+  - Swipe down = soft drop (lowers ~6 rows per swipe; v1.1 QA change from hard drop)
+- **Leaderboard:** classic 1980s-arcade high-score table (spec §11) — top 10, 3-initial entry + **profile icon** (license-free emoji), **starts empty**, saved **on-device** (localStorage; no backend). Global/shared board is a later upgrade.
+- **Audio (v1.1):** synthesized row-clear explosion SFX + low arcade ambient bed, with a mute toggle.
 - **Target:** mobile-first (phones and tablets), with the board sized to **fill the screen** and read large/legible on phones and iPads (spec §6). Desktop is not the target for v1; a keyboard/mouse fallback can come later.
 
 ## Delivery

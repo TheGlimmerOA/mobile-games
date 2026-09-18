@@ -117,7 +117,7 @@ from `touchstart`, using a dead-zone so an intended tap is never read as a swipe
 |---|---|
 | **Tap** (net movement < dead-zone, ~10px) | Rotate clockwise |
 | **Swipe left / right** (dominant horizontal) | Move piece one column; on a continued slide, repeat per ~1 cell-width of travel (KC threshold pattern) |
-| **Swipe down** (dominant vertical, downward) | Hard drop — piece drops to rest and locks immediately |
+| **Swipe down** (dominant vertical, downward) | Soft drop — lowers the piece ~6 rows per swipe (≈3 swipes to the floor); a swipe when already resting locks it. *(v1.1 QA change — was hard drop; see §13)* |
 
 Rules:
 - Classify by dominant axis: compare `|dx|` vs `|dy|`; the larger axis wins.
@@ -313,7 +313,39 @@ controls are allowed here for discoverability, and the game's swipe/tap vocabula
 ## 12. Nice-to-haves (defer unless cheap)
 
 - 7-bag randomizer; lock-delay; simple rotation wall-kick.
-- Soft-drop vs hard-drop distinction on downward swipe.
 - Global/shared leaderboard (requires backend + profanity filter + anti-cheat).
 - PWA/offline support.
 - Haptic feedback (`navigator.vibrate`) on line clear / lock / qualifying score.
+
+---
+
+## 13. v1.1 changes (QA feedback, 2026-09-18)
+
+Applied after the first deployed build, per tester feedback. These **supersede** the
+conflicting original text above where noted.
+
+- **Swipe down = soft drop** (not hard drop). Lowers the piece `SOFT_DROP_ROWS` (=6) rows per
+  swipe; if the piece is already resting, a downward swipe locks it. Gives reaction time.
+  *(Supersedes §4 swipe-down row.)*
+- **Slower speed curve.** `fallInterval` ramps **1.3s → 0.5s over ~20s** (was 0.9→0.25 / 12s),
+  for more time to react and place. *(Supersedes §3.2 numbers.)*
+- **Leaderboard starts empty.** No seeded scores — a new device shows "NO SCORES YET / BE THE
+  FIRST!" and the first qualifying play (any score > 0) enters initials. *(Supersedes §11.2
+  seeding; the empty-table alternative is now the chosen behavior.)*
+- **Profile icons.** After initials, the player picks a **profile icon** from a fixed set of
+  license-free **Unicode emoji** (`ICONS` in `logic.js`: cat, fox, robot, dog, frog, owl,
+  alien, star, game pad, turtle). The icon is stored with the entry and shown as a **column**
+  in the leaderboard (`rank · icon · initials · score`). No third-party character artwork is
+  used (copyright/trademark) — emoji are system-rendered glyphs. Entry flow is now
+  initials (**NEXT**) → icon picker (**DONE**) → board.
+- **Audio (synthesized, no asset files).** Row-clear **explosion** SFX (noise burst + low sine
+  thump) and a **low-volume 1980s-arcade ambient bed** (quiet square-wave arpeggio loop).
+  A **mute toggle** (🔊/🔇, top-left) persists to `localStorage` (`keystack.muted`); audio
+  initializes on first user gesture (browser autoplay policy). On by default (low volume).
+- **iPad styling + contrast.** Vertical background gradient, a playfield panel with an accent
+  (`#64c8ff`) glow border, and **brighter grid lines** (`#3b3b5e`) so they read behind pieces;
+  pieces gained a top highlight + bottom shade for depth. Start screen adds the GLIMMER
+  LEARNING wordmark.
+
+All pure-logic changes are covered by `logic.test.js` (36 tests). Browser-verified for the
+DOM/canvas/audio behavior.
