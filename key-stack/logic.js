@@ -34,3 +34,26 @@ export function rotate(shape) {
       out[x][h - 1 - y] = shape[y][x];
   return out;
 }
+
+export function emptyGrid() {
+  return Array.from({ length: ROWS }, () => Array(COLS).fill(null));
+}
+
+export function canFit(grid, shape, px, py) {
+  for (let y = 0; y < shape.length; y++) {
+    for (let x = 0; x < shape[0].length; x++) {
+      if (!shape[y][x]) continue;
+      const gx = px + x, gy = py + y;
+      if (gx < 0 || gx >= COLS || gy >= ROWS) return false;
+      if (gy >= 0 && grid[gy][gx]) return false;
+    }
+  }
+  return true;
+}
+
+// Lowest y (>= py) at which the shape still fits.
+export function dropY(grid, shape, px, py) {
+  let y = py;
+  while (canFit(grid, shape, px, y + 1)) y += 1;
+  return y;
+}

@@ -32,3 +32,45 @@ test('rotate four times returns original I', () => {
   for (let i = 0; i < 4; i++) s = rotate(s);
   assert.deepEqual(s, TETRO.I);
 });
+
+import { emptyGrid, canFit, dropY } from './logic.js';
+
+test('emptyGrid is ROWS x COLS of null', () => {
+  const g = emptyGrid();
+  assert.equal(g.length, ROWS);
+  assert.equal(g[0].length, COLS);
+  assert.ok(g.every(row => row.every(c => c === null)));
+});
+
+test('canFit within empty board', () => {
+  assert.equal(canFit(emptyGrid(), TETRO.O, 0, 0), true);
+});
+
+test('canFit rejects out of left wall', () => {
+  assert.equal(canFit(emptyGrid(), TETRO.O, -1, 0), false);
+});
+
+test('canFit rejects out of right wall', () => {
+  assert.equal(canFit(emptyGrid(), TETRO.O, COLS - 1, 0), false);
+});
+
+test('canFit rejects below floor', () => {
+  assert.equal(canFit(emptyGrid(), TETRO.O, 0, ROWS - 1), false);
+});
+
+test('canFit rejects overlap with locked cell', () => {
+  const g = emptyGrid();
+  g[5][0] = 'T';
+  assert.equal(canFit(g, TETRO.O, 0, 4), false);
+});
+
+test('dropY lands O on empty floor', () => {
+  assert.equal(dropY(emptyGrid(), TETRO.O, 0, 0), ROWS - 2);
+});
+
+test('dropY stacks on top of a locked cell', () => {
+  const g = emptyGrid();
+  g[ROWS - 1][0] = 'T';
+  g[ROWS - 1][1] = 'T';
+  assert.equal(dropY(g, TETRO.O, 0, 0), ROWS - 3);
+});
