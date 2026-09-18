@@ -149,8 +149,19 @@ const Sound = (() => {
     if (!muted) start();
     return muted;
   }
+  // Idle sleep: stop the music and fully release the audio device.
+  function sleep() {
+    stopAmbient();
+    if (ctx) { try { ctx.close(); } catch {} ctx = null; master = null; ambientGain = null; started = false; }
+  }
+  // Tab hidden/visible: pause/resume without tearing the context down.
+  function setHidden(h) {
+    if (!ctx) return;
+    if (h) { try { ctx.suspend(); } catch {} }
+    else if (!muted) { try { ctx.resume(); } catch {} }
+  }
   function isMuted() { return muted; }
-  return { start, explosion, toggleMute, isMuted, setFast, stopAmbient };
+  return { start, explosion, toggleMute, isMuted, setFast, stopAmbient, sleep, setHidden };
 })();
 
 // ============================================================================
@@ -234,6 +245,12 @@ const G = {
 let testMult = 1;
 let lastFall = 0;
 let overGuardUntil = 0;
+
+// Idle sleep (QA v1.1): after 10 min with no input, stop the loop + audio and free resources.
+const IDLE_LIMIT = 600; // seconds
+let lastInput = nowSec();
+let rafId = null;
+let sleeping = false;
 
 // ============================================================================
 // LEADERBOARD storage (spec §11) — empty at start (QA v1.1), storage-safe
@@ -580,9 +597,44 @@ function endRound() {
 let lastFrame = nowSec();
 function frame() {
   const t = nowSec();
+  if (!sleeping && t - lastInput >= IDLE_LIMIT) { sleepNow(); return; }
   const dt = Math.min(0.05, t - lastFrame); lastFrame = t;
   step(); updateParticles(dt); render();
-  requestAnimationFrame(frame);
+  rafId = requestAnimationFrame(frame);
+}
+
+function markInput() { lastInput = nowSec(); }
+
+function drawSleep() {
+  ctx.fillStyle = 'rgba(11,11,20,0.95)'; ctx.fillRect(0, 0, layout.cssW, layout.cssH);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = ACCENT;
+  ctx.font = `700 ${Math.max(40, Math.round(layout.cssH * 0.09))}px ${MONO}`;
+  ctx.fillText('💤', layout.cssW / 2, layout.cssH * 0.42);
+  ctx.fillStyle = TEXT;
+  ctx.font = `500 ${Math.max(16, Math.round(layout.cssH * 0.032))}px ${MONO}`;
+  ctx.fillText('Sleeping', layout.cssW / 2, layout.cssH * 0.55);
+  ctx.fillText('Tap to wake', layout.cssW / 2, layout.cssH * 0.61);
+}
+
+// Stop everything and release resources after the idle timeout.
+function sleepNow() {
+  if (sleeping) return;
+  sleeping = true;
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+  Sound.sleep();
+  drawSleep();
+}
+
+// Resume in place on the next user gesture.
+function wake() {
+  if (!sleeping) return;
+  sleeping = false;
+  lastInput = nowSec();
+  lastFall = nowSec();   // no instant multi-drop after the gap
+  lastFrame = nowSec();
+  Sound.start();         // re-init audio on this user gesture
+  rafId = requestAnimationFrame(frame);
 }
 
 // ============================================================================
@@ -598,6 +650,8 @@ function inRect(p, b) { return p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p
 
 // Shared gesture resolver for both touch and mouse.
 function handleGesture(p, dx, dy) {
+  markInput();
+  if (sleeping) { wake(); return; }   // the wake tap is consumed, not played into the game
   Sound.start(); // first user gesture unlocks/init audio
   if (inRect(p, muteBtn)) { Sound.toggleMute(); return; }
 
@@ -635,6 +689,7 @@ function handleGesture(p, dx, dy) {
 
 canvas.addEventListener('touchstart', (ev) => {
   ev.preventDefault();
+  markInput();
   const p = ptFromEvent(ev);
   touchStart = { x: p.x, y: p.y };
 }, { passive: false });
@@ -647,7 +702,7 @@ canvas.addEventListener('touchend', (ev) => {
 }, { passive: false });
 
 // Mouse fallback for desktop testing.
-canvas.addEventListener('mousedown', (ev) => { const p = ptFromEvent(ev); touchStart = { x: p.x, y: p.y }; });
+canvas.addEventListener('mousedown', (ev) => { markInput(); const p = ptFromEvent(ev); touchStart = { x: p.x, y: p.y }; });
 canvas.addEventListener('mouseup', (ev) => {
   if (!touchStart) return;
   const p = ptFromEvent(ev);
@@ -659,6 +714,8 @@ canvas.addEventListener('mouseup', (ev) => {
 // DEV HOTKEY — Ctrl/Cmd+Shift+F toggles 5x fall speed (spec §8)
 // ============================================================================
 window.addEventListener('keydown', (e) => {
+  markInput();
+  if (sleeping) wake();
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'F' || e.key === 'f')) {
     e.preventDefault();
     testMult = testMult === 1 ? 5 : 1;
@@ -668,10 +725,12 @@ window.addEventListener('keydown', (e) => {
 // ============================================================================
 // BOOT
 // ============================================================================
-window.addEventListener('resize', resize);
-window.addEventListener('orientationchange', resize);
+function onResize() { resize(); if (sleeping) drawSleep(); }
+window.addEventListener('resize', onResize);
+window.addEventListener('orientationchange', onResize);
+document.addEventListener('visibilitychange', () => Sound.setHidden(document.hidden));
 resize();
-requestAnimationFrame(frame);
+rafId = requestAnimationFrame(frame);
 
 window.__ks = { G, layout, Sound };
 </script>

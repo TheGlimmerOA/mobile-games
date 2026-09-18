@@ -339,9 +339,19 @@ conflicting original text above where noted.
   used (copyright/trademark) — emoji are system-rendered glyphs. Entry flow is now
   initials (**NEXT**) → icon picker (**DONE**) → board.
 - **Audio (synthesized, no asset files).** Row-clear **explosion** SFX (noise burst + low sine
-  thump) and a **low-volume 1980s-arcade ambient bed** (quiet square-wave arpeggio loop).
-  A **mute toggle** (🔊/🔇, top-left) persists to `localStorage` (`keystack.muted`); audio
-  initializes on first user gesture (browser autoplay policy). On by default (low volume).
+  thump) and a **low-volume 1980s-arcade ambient bed**. A **mute toggle** (🔊/🔇, top-left)
+  persists to `localStorage` (`keystack.muted`); audio initializes on first user gesture
+  (browser autoplay policy). On by default (low volume).
+  - **Sound bed (revised):** a 4-bar original progression (A-minor: Am–F–C–G) with a bass line,
+    an arpeggio that alternates pattern per bar, and an occasional sparkle + slight detune —
+    less repetitive than the first loop. **Tempo speeds up during initials entry** (`setFast`)
+    for a "hurry-up" feel, back to normal on the leaderboard / new round.
+- **Idle sleep (10 min).** After 10 minutes with no input (any screen), the game **stops the
+  animation loop, closes the AudioContext, and cancels timers**, then shows a "💤 Sleeping /
+  Tap to wake" screen — releasing CPU/audio resources on an abandoned tab. Any tap/key **wakes
+  it in place** (the wake tap is consumed, not played); audio re-initializes on that gesture and
+  fall timers reset so there's no instant multi-drop. Audio also **pauses when the tab is
+  hidden** (Page Visibility) and resumes when visible (unless muted).
 - **iPad styling + contrast.** Vertical background gradient, a playfield panel with an accent
   (`#64c8ff`) glow border, and **brighter grid lines** (`#3b3b5e`) so they read behind pieces;
   pieces gained a top highlight + bottom shade for depth. Start screen adds the GLIMMER

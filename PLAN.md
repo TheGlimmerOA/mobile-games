@@ -20,7 +20,8 @@ Mobile visitors to glimmerlearning.com currently have nothing to *do* — Keyboa
   - Tap = rotate
   - Swipe down = soft drop (lowers ~6 rows per swipe; v1.1 QA change from hard drop)
 - **Leaderboard:** classic 1980s-arcade high-score table (spec §11) — top 10, 3-initial entry + **profile icon** (license-free emoji), **starts empty**, saved **on-device** (localStorage; no backend). Global/shared board is a later upgrade.
-- **Audio (v1.1):** synthesized row-clear explosion SFX + low arcade ambient bed, with a mute toggle.
+- **Audio (v1.1):** synthesized row-clear explosion SFX + a low arcade ambient bed (4-bar Am–F–C–G, bass+arp+sparkle; speeds up during initials entry), with a mute toggle.
+- **Idle sleep (v1.1):** after 10 min idle, stops the loop + closes audio + shows "Tap to wake"; any input resumes in place. Audio also pauses when the tab is hidden.
 - **Target:** mobile-first (phones and tablets), with the board sized to **fill the screen** and read large/legible on phones and iPads (spec §6). Desktop is not the target for v1; a keyboard/mouse fallback can come later.
 
 ## Delivery
