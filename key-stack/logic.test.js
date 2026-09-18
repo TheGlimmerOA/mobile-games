@@ -150,3 +150,50 @@ test('fallInterval starts near 0.9 and floors at 0.25', () => {
 test('fallInterval respects the test multiplier', () => {
   assert.ok(Math.abs(fallInterval(0, 5) - 0.18) < 1e-9);
 });
+
+import { LB_SIZE, qualifies, insertScore, sanitizeInitials, seedScores } from './logic.js';
+
+const full = Array.from({ length: 10 }, (_, i) => ({ initials: 'AAA', score: 100 - i * 10 }));
+
+test('qualifies when table not full', () => {
+  assert.equal(qualifies([], 1), true);
+});
+
+test('does not qualify with a zero score', () => {
+  assert.equal(qualifies([], 0), false);
+});
+
+test('qualifies when beating the lowest on a full table', () => {
+  assert.equal(qualifies(full, 11), true);
+});
+
+test('does not qualify when equal to the lowest on a full table', () => {
+  assert.equal(qualifies(full, 10), false);
+});
+
+test('insertScore keeps sorted, caps at 10', () => {
+  const out = insertScore(full, { initials: 'MAY', score: 55 });
+  assert.equal(out.length, LB_SIZE);
+  for (let i = 1; i < out.length; i++) assert.ok(out[i - 1].score >= out[i].score);
+  assert.ok(out.some(e => e.initials === 'MAY' && e.score === 55));
+});
+
+test('tie places newcomer below the incumbent', () => {
+  const base = [{ initials: 'OLD', score: 50 }];
+  const out = insertScore(base, { initials: 'NEW', score: 50 });
+  assert.deepEqual(out.map(e => e.initials), ['OLD', 'NEW']);
+});
+
+test('sanitizeInitials upper-cases, filters, pads to 3', () => {
+  assert.equal(sanitizeInitials('m'), 'MAA');
+  assert.equal(sanitizeInitials('may'), 'MAY');
+  assert.equal(sanitizeInitials('m@y!'), 'MYA');
+  assert.equal(sanitizeInitials(''), 'AAA');
+  assert.equal(sanitizeInitials('abcd'), 'ABC');
+});
+
+test('seedScores returns a valid descending top-10', () => {
+  const s = seedScores();
+  assert.equal(s.length, LB_SIZE);
+  for (let i = 1; i < s.length; i++) assert.ok(s[i - 1].score >= s[i].score);
+});

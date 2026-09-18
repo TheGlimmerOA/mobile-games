@@ -104,3 +104,34 @@ export function fallInterval(elapsedSec, testMult = 1) {
   const iv = Math.max(0.25, 0.9 - ramp * 0.65);
   return iv / testMult;
 }
+
+// ---- Leaderboard (local, top 10, 3 initials) --------------------------------
+
+export const LB_SIZE = 10;
+
+export function qualifies(scores, score) {
+  if (score <= 0) return false;
+  if (scores.length < LB_SIZE) return true;
+  return score > scores[scores.length - 1].score;
+}
+
+export function insertScore(scores, entry) {
+  const list = scores.slice();
+  // Insert before the first entry with a strictly smaller score (so ties go below).
+  let i = list.findIndex(e => e.score < entry.score);
+  if (i === -1) i = list.length;
+  list.splice(i, 0, entry);
+  return list.slice(0, LB_SIZE);
+}
+
+const ALLOWED = /[A-Z. ]/;
+export function sanitizeInitials(str) {
+  const chars = String(str).toUpperCase().split('').filter(c => ALLOWED.test(c));
+  while (chars.length < 3) chars.push('A');
+  return chars.slice(0, 3).join('');
+}
+
+export function seedScores() {
+  const names = ['GLM', 'MAY', 'ACE', 'BOT', 'KEY', 'ZAP', 'FOX', 'JET', 'OWL', 'AAA'];
+  return names.map((initials, i) => ({ initials, score: 100 - i * 10 }));
+}
