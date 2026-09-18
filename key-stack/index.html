@@ -41,7 +41,7 @@ const MONO = '"SF Mono", "JetBrains Mono", Consolas, Menlo, monospace';
 // AUDIO — synthesized (no asset files): explosion SFX + low 1980s arcade bed + mute
 // ============================================================================
 const Sound = (() => {
-  let ctx = null, master = null, ambientGain = null, ambientTimer = null, started = false;
+  let ctx = null, master = null, ambientGain = null, started = false;
   let muted = false;
   try { muted = localStorage.getItem('keystack.muted') === '1'; } catch {}
 
@@ -80,25 +80,66 @@ const Sound = (() => {
     o.connect(og); og.connect(master); o.start(t); o.stop(t + 0.35);
   }
 
-  // A slow, quiet arpeggio loop — arcade attract-mode feel.
-  const SEQ = [0, 3, 7, 10, 7, 3, 0, 3, 7, 12, 7, 3];
-  let step = 0;
-  function startAmbient() {
-    if (ambientTimer) return;
-    const base = 196; // G3
-    ambientTimer = setInterval(() => {
-      if (!ctx || muted) return;
-      const t = ctx.currentTime;
-      const semi = SEQ[step % SEQ.length]; step++;
-      const freq = base * Math.pow(2, semi / 12);
-      const o = ctx.createOscillator(); o.type = 'square'; o.frequency.value = freq;
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.linearRampToValueAtTime(1, t + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.24);
-      o.connect(g); g.connect(ambientGain); o.start(t); o.stop(t + 0.26);
-    }, 300);
+  // --- Music bed: a 4-bar original progression (A-minor: Am–F–C–G) with a bass line,
+  // a varied arpeggio, and an occasional sparkle so it doesn't feel like one short loop.
+  // Tempo speeds up during initials entry (setFast).
+  const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
+  let running = false, fast = false, stepIx = 0, timer = null;
+
+  function tone(midi, type, t, dur, gain, detune) {
+    const o = ctx.createOscillator(); o.type = type; o.frequency.value = mtof(midi);
+    if (detune) o.detune.value = detune;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(gain, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(ambientGain); o.start(t); o.stop(t + dur + 0.05);
   }
+
+  // Each bar: bass root + three chord tones.
+  const PROG = [
+    { bass: 45, notes: [57, 60, 64] }, // Am
+    { bass: 41, notes: [57, 60, 65] }, // F
+    { bass: 48, notes: [55, 60, 64] }, // C
+    { bass: 43, notes: [55, 59, 62] }, // G
+  ];
+  // Arp note-index patterns over 8 steps (alternate per bar; index 3 = root up an octave).
+  const ARP = [
+    [0, 2, 1, 2, 0, 2, 1, 3],
+    [0, 1, 2, 3, 2, 1, 0, 2],
+  ];
+
+  function playStep() {
+    if (!ctx || muted) return;
+    const t = ctx.currentTime;
+    const bar = Math.floor(stepIx / 8) % 4;
+    const inBar = stepIx % 8;
+    const chord = PROG[bar];
+    // Bass on the two strong beats.
+    if (inBar === 0 || inBar === 4) tone(chord.bass, 'triangle', t, fast ? 0.22 : 0.42, 0.9);
+    // Lead arpeggio (varies by bar; occasional skip for a less mechanical feel).
+    if (Math.random() > 0.08) {
+      const idx = ARP[bar % 2][inBar];
+      const note = idx === 3 ? chord.notes[0] + 12 : chord.notes[idx];
+      tone(note, 'square', t, fast ? 0.12 : 0.2, 0.5, (Math.random() - 0.5) * 6);
+    }
+    // Sparkle high note near the end of the odd bars.
+    if (inBar === 6 && bar % 2 === 1) tone(chord.notes[2] + 12, 'sine', t, 0.3, 0.35);
+  }
+
+  function startAmbient() {
+    if (running) return;
+    running = true;
+    const tick = () => {
+      if (!running) return;
+      playStep();
+      stepIx = (stepIx + 1) % 32;
+      timer = setTimeout(tick, fast ? 115 : 200);
+    };
+    tick();
+  }
+  function stopAmbient() { running = false; if (timer) { clearTimeout(timer); timer = null; } }
+  function setFast(v) { fast = !!v; }
 
   function toggleMute() {
     muted = !muted;
@@ -109,7 +150,7 @@ const Sound = (() => {
     return muted;
   }
   function isMuted() { return muted; }
-  return { start, explosion, toggleMute, isMuted };
+  return { start, explosion, toggleMute, isMuted, setFast, stopAmbient };
 })();
 
 // ============================================================================
@@ -229,6 +270,7 @@ function beginEntry(score) {
   entry.score = score;
   entry.icon = ICONS[0];
   G.state = 'entry';
+  Sound.setFast(true);   // hurry-up tempo while entering initials
 }
 function cycleSlot(dir) {
   const i = ENTRY_CHARS.indexOf(entry.slots[entry.active]);
@@ -242,6 +284,7 @@ function submitEntry() {
   });
   saveScores();
   G.state = 'board';
+  Sound.setFast(false);  // back to the relaxed tempo on the leaderboard
 }
 
 // ============================================================================
@@ -483,6 +526,7 @@ function startRound() {
   G.grid = emptyGrid(); G.score = 0; particles = [];
   G.next = randName(); G.state = 'play';
   G.startedAt = nowSec(); lastFall = nowSec();
+  Sound.setFast(false);
   spawn();
 }
 function tryMove(dcol) { if (G.state === 'play' && canFit(G.grid, G.piece, G.px + dcol, G.py)) G.px += dcol; }
