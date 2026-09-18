@@ -112,3 +112,41 @@ test('clearRows handles multiple rows', () => {
   const out = clearRows(g, fullRows(g));
   assert.ok(out.every(row => row.every(c => c === null)));
 });
+
+import { classifyGesture, fallInterval } from './logic.js';
+
+test('small movement is a tap', () => {
+  assert.equal(classifyGesture(3, -4, 30).type, 'tap');
+});
+
+test('rightward swipe moves right, columns scale with distance', () => {
+  const r = classifyGesture(65, 5, 30);
+  assert.equal(r.type, 'move');
+  assert.equal(r.dir, 1);
+  assert.equal(r.cols, 2);
+});
+
+test('leftward swipe moves left at least one column', () => {
+  const r = classifyGesture(-20, 3, 30);
+  assert.equal(r.type, 'move');
+  assert.equal(r.dir, -1);
+  assert.ok(r.cols >= 1);
+});
+
+test('downward swipe is hard drop', () => {
+  assert.equal(classifyGesture(5, 80, 30).type, 'harddrop');
+});
+
+test('upward swipe is none (no gameplay action)', () => {
+  assert.equal(classifyGesture(4, -80, 30).type, 'none');
+});
+
+test('fallInterval starts near 0.9 and floors at 0.25', () => {
+  assert.ok(Math.abs(fallInterval(0) - 0.9) < 1e-9);
+  assert.ok(fallInterval(1000) >= 0.25 - 1e-9);
+  assert.ok(fallInterval(1000) <= 0.26);
+});
+
+test('fallInterval respects the test multiplier', () => {
+  assert.ok(Math.abs(fallInterval(0, 5) - 0.18) < 1e-9);
+});

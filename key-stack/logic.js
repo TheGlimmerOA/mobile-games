@@ -86,3 +86,21 @@ export function clearRows(grid, rows) {
   for (let i = 0; i < sorted.length; i++) g.unshift(Array(COLS).fill(null));
   return g;
 }
+
+// Classify a touch by net displacement (evaluated on touchend). dead-zone = tapMax px.
+export function classifyGesture(dx, dy, cellW, tapMax = 12) {
+  if (Math.abs(dx) < tapMax && Math.abs(dy) < tapMax) return { type: 'tap' };
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    const cols = Math.max(1, Math.round(Math.abs(dx) / cellW));
+    return { type: 'move', dir: dx > 0 ? 1 : -1, cols };
+  }
+  if (dy > 0) return { type: 'harddrop' };
+  return { type: 'none' }; // upward swipe: unused in gameplay
+}
+
+// Seconds per row. Ramps 0.9 -> 0.25 over ~12s of play; testMult speeds it up.
+export function fallInterval(elapsedSec, testMult = 1) {
+  const ramp = Math.min(1, elapsedSec / 12);
+  const iv = Math.max(0.25, 0.9 - ramp * 0.65);
+  return iv / testMult;
+}
